@@ -3,6 +3,7 @@ import { Calendar, Users, BookOpen, TrendingUp, MessageSquare, Settings, Chevron
 import { supabase } from './supabase';
 import { formatDate, formatTime, getTimeUntil } from './utils/formatters';
 import { resolveAssetUrl } from './utils/assetUrls';
+import { resolveStorageUrl } from './utils/storageUrl';
 import { Button, Card, Badge, Modal, LoadingSpinner } from './components/ui';
 import { Sidebar, Header } from './components/layout';
 import { AdminLogin, MemberLogin } from './components/auth';
@@ -135,7 +136,6 @@ export default function App() {
       // ignore storage errors
     }
 
-    // Refresh site settings on startup to avoid stale cached splash colors.
     try {
       await refreshSiteSettings();
     } catch {
@@ -331,6 +331,32 @@ export default function App() {
     }
   }, [currentView, isAdmin]);
 
+  // Ensure an admin_sessions row exists whenever the client is in admin mode.
+  // Server-side admin actions (/api/deal-room-admin) verify the caller against
+  // this table, so even when the session was restored from localStorage and
+  // never went through handleAdminLogin in this tab, we need to backfill it.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const deviceId = getDeviceId();
+    (async () => {
+      try {
+        const { data: existing } = await supabase
+          .from('admin_sessions')
+          .select('id')
+          .eq('device_id', deviceId)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (existing) return;
+        await supabase.from('admin_sessions').insert([{
+          device_id: deviceId,
+          is_active: true,
+        }]);
+      } catch (err) {
+        console.error('Error ensuring admin session:', err);
+      }
+    })();
+  }, [isAdmin]);
+
   useEffect(() => {
     if (!siteSettings) return;
     document.documentElement.style.setProperty('--primary-color', siteSettings.primary_color || '#1B4D5C');
@@ -389,6 +415,7 @@ export default function App() {
     } catch (err) {
       console.error('Error clearing member session:', err);
     }
+    try { localStorage.removeItem('ngvc_deals_disclosure_accepted_member_id'); } catch {}
     setLoggedInMember(null);
     setIsAdmin(false); // Reset admin mode
     setCurrentView('member-login');
@@ -397,21 +424,20 @@ export default function App() {
   const handleAdminLogin = async (remember) => {
     setIsAdmin(true);
     setCurrentView('admin-dashboard');
-    
-    if (remember) {
-      const deviceId = getDeviceId();
-      try {
-        // Clear any existing admin session for this device
-        await supabase.from('admin_sessions').delete().eq('device_id', deviceId);
-        
-        // Create new session
-        await supabase.from('admin_sessions').insert([{
-          device_id: deviceId,
-          is_active: true,
-        }]);
-      } catch (err) {
-        console.error('Error saving admin session:', err);
-      }
+
+    // Always create an admin_sessions row — server-side admin actions
+    // (e.g. /api/deal-room-admin) check this table to verify the caller.
+    // The `remember` flag now only controls whether the localStorage flag
+    // restores admin mode on next page load.
+    const deviceId = getDeviceId();
+    try {
+      await supabase.from('admin_sessions').delete().eq('device_id', deviceId);
+      await supabase.from('admin_sessions').insert([{
+        device_id: deviceId,
+        is_active: true,
+      }]);
+    } catch (err) {
+      console.error('Error saving admin session:', err);
     }
   };
   
@@ -649,7 +675,6 @@ export default function App() {
           setIsOpen={setSidebarOpen}
         />
 
-        {/* LinkedIn OAuth feedback banner */}
         {linkedinStatus && (
           <div className={`mx-4 lg:mx-8 mt-4 px-4 py-3 rounded-lg flex items-center justify-between ${
             linkedinStatus === 'connected'
@@ -663,10 +688,7 @@ export default function App() {
                   ? 'LinkedIn connection was cancelled.'
                   : `Something went wrong connecting LinkedIn. ${linkedinErrorDetail || 'Please try again.'}`}
             </span>
-            <button
-              onClick={() => setLinkedinStatus(null)}
-              className="ml-4 text-gray-500 hover:text-gray-700"
-            >
+            <button onClick={() => setLinkedinStatus(null)} className="ml-4 text-gray-500 hover:text-gray-700">
               <X size={16} />
             </button>
           </div>
@@ -684,7 +706,6 @@ export default function App() {
         </footer>
       </main>
 
-      {/* LinkedIn connect prompt */}
       {showLinkedinPrompt && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
@@ -692,7 +713,7 @@ export default function App() {
             <div className="p-6 text-center">
               <div className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color, #1B4D5C) 15%, white)' }}>
                 {loggedInMember?.photo_url ? (
-                  <img src={loggedInMember.photo_url} alt="" className="w-full h-full rounded-full object-cover" />
+                  <img src={resolveStorageUrl(loggedInMember.photo_url, 'profile-photos')} alt="" className="w-full h-full rounded-full object-cover" />
                 ) : (
                   <User size={36} className="text-gray-300" />
                 )}
@@ -703,26 +724,12 @@ export default function App() {
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">
                 Other club members see your profile during meetings. One click imports your photo and name from LinkedIn.
               </p>
-              <a
-                href={`/api/linkedin-auth?member_id=${loggedInMember?.id}`}
-                className="mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white font-medium text-sm transition-opacity hover:opacity-90"
-                style={{ backgroundColor: '#0A66C2' }}
-              >
+              <a href={`/api/linkedin-auth?member_id=${loggedInMember?.id}`} className="mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white font-medium text-sm transition-opacity hover:opacity-90" style={{ backgroundColor: '#0A66C2' }}>
                 <Linkedin size={18} />
                 Connect LinkedIn
               </a>
-              <button
-                onClick={skipLinkedinPrompt}
-                className="mt-3 w-full text-sm text-gray-500 hover:text-gray-700 py-2"
-              >
-                I'll do it myself
-              </button>
-              <button
-                onClick={dismissLinkedinPromptForever}
-                className="w-full text-xs text-gray-300 hover:text-gray-400 py-1"
-              >
-                Skip, and don't see again
-              </button>
+              <button onClick={skipLinkedinPrompt} className="mt-3 w-full text-sm text-gray-500 hover:text-gray-700 py-2">I'll do it myself</button>
+              <button onClick={dismissLinkedinPromptForever} className="w-full text-xs text-gray-300 hover:text-gray-400 py-1">Skip, and don't see again</button>
             </div>
           </div>
         </div>

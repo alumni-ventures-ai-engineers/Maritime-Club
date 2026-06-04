@@ -4,6 +4,7 @@ import { supabase } from '../../supabase';
 import { Button, Card, Badge, Modal, Avatar } from '../../components/ui';
 import { PROFILE_OPTIONS } from '../../constants/profileOptions';
 import { DealInterestCard } from '../../contexts/MessagingContext';
+import { resolveStorageUrl } from '../../utils/storageUrl';
 
 const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -13,7 +14,7 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef(null);
   
-  const sectorOptions = ['AI/ML', 'Healthcare', 'Fintech', 'Climate', 'Enterprise Software', 'Consumer', 'Deep Tech', 'Crypto/Web3', 'Space'];
+  const sectorOptions = ['AI/ML', 'Healthcare', 'Fintech', 'Climate', 'Enterprise Software', 'Consumer', 'Deep Tech', 'Crypto/Web3'];
   const clubRoleOptions = ['Club President', 'Club Operations', 'Mentor', 'Contributor'];
   
   useEffect(() => {
@@ -84,10 +85,8 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
         .from('profile-photos')
         .upload(filePath, file, { cacheControl: '3600', upsert: true });
       if (error) throw error;
-      const { data: urlData } = supabase.storage
-        .from('profile-photos')
-        .getPublicUrl(filePath);
-      setFormData(prev => ({ ...prev, photo_url: urlData.publicUrl }));
+      // Store the bare storage path; reads go through /api/storage-redirect.
+      setFormData(prev => ({ ...prev, photo_url: filePath }));
     } catch (err) {
       console.error('Photo upload error:', err);
       alert('Error uploading photo: ' + err.message);
@@ -260,7 +259,7 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
             <div className="relative">
               {currentUser.photo_url ? (
                 <div className="w-24 h-24 rounded-full overflow-hidden">
-                  <img src={currentUser.photo_url} alt={currentUser.full_name} className="w-full h-full object-cover" />
+                  <img src={resolveStorageUrl(currentUser.photo_url, 'profile-photos')} alt={currentUser.full_name} className="w-full h-full object-cover" />
                 </div>
               ) : (
                 <Avatar 
@@ -355,7 +354,6 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
             <h3 className="font-semibold text-gray-900 mb-4">Connect</h3>
 
             <div className="space-y-2">
-              {/* LinkedIn OAuth connect / connected status */}
               {currentUser.linkedin_connected ? (
                 <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
                   <Linkedin size={18} className="text-green-600" />
@@ -363,10 +361,7 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
                   <CheckCircle size={14} className="text-green-500 ml-auto" />
                 </div>
               ) : (
-                <a
-                  href={`/api/linkedin-auth?member_id=${currentUser.id}`}
-                  className="flex items-center gap-3 p-3 bg-sky-50 rounded-lg hover:bg-sky-100 transition-colors"
-                >
+                <a href={`/api/linkedin-auth?member_id=${currentUser.id}`} className="flex items-center gap-3 p-3 bg-sky-50 rounded-lg hover:bg-sky-100 transition-colors">
                   <Linkedin size={18} className="text-sky-600" />
                   <span className="text-sm font-medium text-sky-700">Connect LinkedIn</span>
                   <span className="text-xs text-sky-500 ml-auto">Import photo & name</span>
@@ -495,7 +490,7 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
                             title={formData.photo_url ? 'Profile photo selected' : 'Upload profile photo'}
                           >
                             {formData.photo_url ? (
-                              <img src={formData.photo_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                              <img src={resolveStorageUrl(formData.photo_url, 'profile-photos')} alt="" className="w-8 h-8 rounded-full object-cover" />
                             ) : (
                               <Upload size={16} className="text-gray-400" />
                             )}
@@ -761,7 +756,7 @@ const MemberProfile = ({ currentUser, isAdmin = false, onRefresh, onUserUpdate }
                             title={formData.photo_url ? 'Profile photo selected' : 'Upload profile photo'}
                           >
                             {formData.photo_url ? (
-                              <img src={formData.photo_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                              <img src={resolveStorageUrl(formData.photo_url, 'profile-photos')} alt="" className="w-8 h-8 rounded-full object-cover" />
                             ) : (
                               <Upload size={16} className="text-gray-400" />
                             )}
